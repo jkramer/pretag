@@ -1,0 +1,266 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use feature 'state';
+
+use Getopt::LL::Short qw( getoptions );
+use Lingua::EN::Titlecase;
+use MP3::Tag;
+
+use Data::Dump qw(dump); # TODO: Remove
+
+my $o = getoptions(
+	[
+		'--pattern|-p=s',
+
+		'--artist|-a=s',
+		'--album|-l=s',
+		'--title|-t=s',
+		'--track|-n=s',
+		'--genre|-g=s',
+		'--year|-y=s',
+		'--comment|-o=s',
+
+		'--rename|-r=s',
+		'--update|-u',
+
+		'--title-case|-c',
+		'--zero-pad|-z=d',
+		'--noise|-N=s',
+
+		'--verbose|-v',
+		'--help|-h',
+		'--dry-run|-d',
+	],
+);
+
+
+my $usage = <<USAGE;
+
+Usage: $0 <-p pattern> [optional stuff] [bunch of MP3 files]
+
+-p <pattern> | --pattern=<pattern>
+Looking at the usage line above, you might have thought, "hey, -p is the
+only non-optional argument, so it must be important," and you're right!
+This whole script is about that pattern, because it lets us gather track
+information from file names using a regular expression. This is why you
+need to know (Perl) regular expressions to use this tool. The wanted
+information is extracted from the file names using "named groups" or "named
+capture buffers". Check perlre(1pm) and the examples below for details.
+
+-v | --verbose
+Print lots of information about what's going on.
+
+-h | --help
+Print this help text and quit.
+
+-d | --dry-run
+Don't actually do anything (only useful with -v to see what would be done
+if you had not used -d).
+
+-c | --title-case
+Try to fix the title case of found tags.
+
+-N <noise> | --noise=<noise>
+Use this to define a regular expression that matches characters and strings
+considered line noise. E.g., some people think it's funny to distribute
+files like this "09-bloodhound_gang_-_the_ballad_of_chasey_lain-ysp.mp3"; use
+"-N '_|-ysp'" to fix it.
+
+-z <width> | --zero-pad=<width>
+Use this to fill the track number with zeros to the given width. For
+example, the original track number 1 would become 001 with -z 3. Only
+affects the generated file name (when -r is given), not the ID3 tag.
+
+-r <format> | --rename=<format>
+Rename the file using the given file name format. See below for format
+flags.
+
+-u | --update
+Update the MP3 files ID3 tags with the information captured from the file
+name and/or defined as command line argument.
+
+Note: Even if you have specified a tag in your regular expression, if you
+also define the tag using one of the options below, it will override the
+one found in the file name.
+
+-a <artist> | --artist=<artist>
+Override artist.
+
+-l <album> | --album=<album>
+Override album.
+
+-t <title> | --title=<title>
+Override title (sometimes called song name).
+
+-n <track-number> | --track=<track-number>
+Override track number.
+
+-y <year> | --year=<year>
+Override release year.
+
+-o <comment> | --comment=<comment>
+Override comment.
+
+-g <genre> | --genre=<genre>
+Override genre
+
+
+Examples
+
+Assuming you pirated the album "Back on the Streets" by 88 Fingers Louie
+somehow (don't do that!), but the ID3 tags are in bad shape and you don't
+like the file names because they look like this:
+
+[01] - 88 fingers louie - tomorrow starts today.mp3
+[02] - 88 fingers louie - selfish means.mp3
+...
+
+Then you might try this.
+
+$0 \
+	-p '^\\[(?<track>\\d+)\\] - (?<artist>.*?) - (?<title>.*)\\.mp3\$' \
+	-l 'Back on the Streets' \
+	-c -u -y 1998 -g 'Hardcore' \
+	*.mp3
+
+Adding -v, the script would print something like this:
+
+[01] - 88 fingers louie - tomorrow starts today.mp3:
+		Artist: 88 Fingers Louie
+		Album:  Back on the Streets
+		Title:  Tomorrow Starts Today
+		Track:  01
+		Year:   1998
+		Genre:  Hardcore
+		Comment:
+Writing tags for [01] - 88 fingers louie - tomorrow starts today.mp3.
+...
+
+Use -r to rename files using the freshly detected meta data.
+
+For example, add this to the command above:
+
+... -z 2 -r '<track> - <title>.mp3'
+
+This will rename the file in the example above from '[01] - 88 fingers louie -
+tomorrow starts today.mp3' to '01 - Tomorrow Starts Today.mp3'.
+
+USAGE
+
+
+if($o->{'--help'}) {
+	print $usage;
+	exit;
+}
+
+
+die $usage unless $o->{'--pattern'};
+
+my $re = qr/$o->{'--pattern'}/o;
+my $verbose = $o->{'--verbose'};
+
+for my $file (@ARGV) {
+	if(!-f $file || !-w $file) {
+		warn "$file is not a writable file.\n";
+		next;
+	}
+
+	if($file =~ $re) {
+		my %tags;
+		my %matches = %+;
+
+		print $file, ":\n" if($verbose);
+
+		for(qw(artist album title track)) {
+			my $tag = $o->{'--' . $_};
+
+			if(!defined($tag)) {
+				$tag = $matches{$_};
+
+				if($o->{'--noise'}) {
+					my $re = qr/$o->{'--noise'}/;
+					$tag =~ s/$re/ /g;
+				}
+
+				if(!defined($tag) or length($tag) == 0) {
+					die "No $_ given/found for $file.\n";
+				}
+			}
+
+			$tag =~ s/^\s+//;
+			$tag =~ s/\s+$//;
+			$tag =~ s/\s{2,}/ /g;
+
+			$tag = titlecase($tag) if($o->{'--title-case'});
+
+			print "\t", ucfirst($_), ":\t", $tag, "\n" if($verbose);
+
+			$tags{$_} = $tag;
+		}
+
+
+		# Complete tags.
+		for(qw(year genre comment)) {
+			my $option = '--' . $_;
+
+			if(defined($o->{$option})) {
+				$tags{$_} = $o->{$option};
+
+				print "\t", ucfirst($_), ":\t", $tags{$_}, "\n" if($verbose);
+			}
+		}
+
+
+		# Update MP3 tags in file.
+		if($o->{'--update'}) {
+			print "Writing tags for $file.\n" if($verbose);
+			if(!$o->{'--dry-run'}) {
+				my $mp3 = new MP3::Tag($file);
+				$mp3->update_tags(\%tags);
+			}
+		}
+
+		if($o->{'--rename'}) {
+			my $format = $o->{'--rename'};
+
+			my $new_name = $o->{'--rename'};
+
+			my %replacements = %tags;
+
+			if($o->{'--zero-pad'} && defined($replacements{track})) {
+				$replacements{track} = sprintf(
+					'%0' . $o->{'--zero-pad'} . 'd',
+					$replacements{track}
+				);
+			}
+
+			while(my ($k, $v) = each %replacements) {
+				$new_name =~ s/<\Q$k\E>/$v/g;
+			}
+
+			print "Renaming to: '$new_name'\n" if($verbose);
+
+			if(!$o->{'--dry-run'}) {
+				if(!rename($file, $new_name)) {
+					warn "Failed to rename file '$file'. $!.\n";
+				}
+			}
+		}
+	}
+	else {
+		warn "'$file' doesn't match expression $re. Ignoring this one.\n";
+	}
+}
+
+sub titlecase {
+	my ($string) = @_;
+
+	state $tc = new Lingua::EN::Titlecase;
+
+	$tc->title($string);
+
+	return $tc->titlecase;
+}
