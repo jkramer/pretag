@@ -44,8 +44,10 @@ example, the original track number 1 would become 001 with -z 3. Only
 affects the generated file name (when -r is given), not the ID3 tag.
 
 -r <format> | --rename=<format>
-Rename the file using the given file name format. See below for format
-flags.
+Rename the file using the given file name format. The format should like this:
+"<track> - <artist> - <title>.mp3" - guess I see the pattern. Just put any of
+the long tag option names between <> and it will be replaced with the
+corresponding tag data.
 
 -u | --update
 Update the MP3 files ID3 tags with the information captured from the file
@@ -80,8 +82,8 @@ Override genre
 Examples
 
 Assuming you pirated the album "Back on the Streets" by 88 Fingers Louie
-somehow (don't do that, it's illegal!), but the ID3 tags are in bad shape and you don't
-like the file names because they look like this:
+somehow (don't do that, it's illegal!), but the ID3 tags are in bad shape and
+you don't like the file names because they look like this:
 
 [01] - 88 fingers louie - tomorrow starts today.mp3
 [02] - 88 fingers louie - selfish means.mp3
